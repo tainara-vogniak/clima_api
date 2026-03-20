@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🌤️ Assistente do Tempo</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --border: #334155;
+            --accent: #38bdf8;
+            --accent2: #818cf8;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --user-bg: #1d4ed8;
+            --bot-bg: #1e293b;
+            --radius: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* ── Header ── */
+        header {
+            width: 100%;
+            padding: 20px 32px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+            box-shadow: 0 4px 24px #0ea5e940;
+        }
+
+        header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -.5px;
+        }
+
+        header span {
+            font-size: 1.8rem;
+        }
+
+        /* ── Main layout ── */
+        main {
+            width: 100%;
+            max-width: 900px;
+            padding: 28px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            flex: 1;
+        }
+
+        /* ── Setup card ── */
+        #setup-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 28px;
+        }
+
+        #setup-card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 20px;
+            color: var(--accent);
+        }
+
+        .input-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .input-row input {
+            flex: 1;
+            min-width: 160px;
+            padding: 12px 16px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-size: .95rem;
+            outline: none;
+            transition: border-color .2s;
+        }
+
+        .input-row input:focus {
+            border-color: var(--accent);
+        }
+
+        .input-row input::placeholder {
+            color: var(--muted);
+        }
+
+        #btn-iniciar {
+            padding: 12px 28px;
+            background: linear-gradient(135deg, #0ea5e9, #6366f1);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-size: .95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity .2s, transform .1s;
+            white-space: nowrap;
+        }
+
+        #btn-iniciar:hover {
+            opacity: .9;
+            transform: translateY(-1px);
+        }
+
+        #btn-iniciar:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* ── Clima cards ── */
+        #clima-section {
+            display: none;
+        }
+
+        #clima-section h2 {
+            font-size: 1rem;
+            color: var(--muted);
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #clima-section h2 strong {
+            color: var(--accent);
+            font-size: 1.15rem;
+        }
+
+        .clima-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 12px;
+        }
+
+        .clima-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            transition: transform .2s;
+        }
+
+        .clima-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .clima-card .icon {
+            font-size: 1.6rem;
+        }
+
+        .clima-card .label {
+            font-size: .75rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .clima-card .value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .clima-card .unit {
+            font-size: .75rem;
+            color: var(--muted);
+        }
+
+        .condicao-badge {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, #0ea5e920, #6366f120);
+            border: 1px solid var(--accent);
+            border-radius: 12px;
+            padding: 14px 20px;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* ── Chat ── */
+        #chat-section {
+            display: none;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        #mensagens {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            height: 380px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            scroll-behavior: smooth;
+        }
+
+        .msg {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            animation: fadeIn .25s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        .msg.user {
+            flex-direction: row-reverse;
+        }
+
+        .avatar {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .msg.user .avatar {
+            background: var(--user-bg);
+        }
+
+        .msg.bot .avatar {
+            background: linear-gradient(135deg, #0ea5e9, #6366f1);
+        }
+
+        .bubble {
+            max-width: 72%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            line-height: 1.55;
+            font-size: .93rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .msg.user .bubble {
+            background: var(--user-bg);
+            border-bottom-right-radius: 4px;
+        }
+
+        .msg.bot .bubble {
+            background: #263354;
+            border-bottom-left-radius: 4px;
+        }
+
+        /* Typing indicator */
+        .typing .bubble {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+            padding: 14px 18px;
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--muted);
+            animation: bounce .9s infinite;
+        }
+
+        .dot:nth-child(2) {
+            animation-delay: .15s;
+        }
+
+        .dot:nth-child(3) {
+            animation-delay: .30s;
+        }
+
+        @keyframes bounce {
+
+            0%,
+            60%,
+            100% {
+                transform: translateY(0)
+            }
+
+            30% {
+                transform: translateY(-8px)
+            }
+        }
+
+        /* Input area */
+        .chat-input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        #input-msg {
+            flex: 1;
+            padding: 13px 18px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: var(--text);
+            font-size: .95rem;
+            outline: none;
+            transition: border-color .2s;
+            resize: none;
+        }
+
+        #input-msg:focus {
+            border-color: var(--accent);
+        }
+
+        #input-msg::placeholder {
+            color: var(--muted);
+        }
+
+        #btn-enviar {
+            padding: 13px 22px;
+            background: linear-gradient(135deg, #0ea5e9, #6366f1);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: opacity .2s, transform .1s;
+        }
+
+        #btn-enviar:hover {
+            opacity: .9;
+            transform: scale(1.05);
+        }
+
+        #btn-enviar:disabled {
+            opacity: .4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Sugestões */
+        .sugestoes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .sugestoes button {
+            padding: 7px 14px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            color: var(--muted);
+            font-size: .82rem;
+            cursor: pointer;
+            transition: all .2s;
+        }
+
+        .sugestoes button:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* ── Error toast ── */
+        #toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: #ef4444;
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: .9rem;
+            font-weight: 500;
+            transition: transform .3s ease;
+            z-index: 99;
+            pointer-events: none;
+        }
+
+        #toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <span>🌤️</span>
+        <h1>Assistente de Previsão do Tempo</h1>
+    </header>
+
+    <main>
+        <!-- Setup -->
+        <div id="setup-card">
+            <h2>📍 Onde você está?</h2>
+            <div class="input-row">
+                <input id="cidade" type="text" placeholder="Cidade (ex: São Paulo)" autocomplete="off" />
+                <input id="estado" type="text" placeholder="Estado (ex: SP)" maxlength="2" autocomplete="off" />
+                <button id="btn-iniciar" onclick="iniciar()">Buscar clima ›</button>
+            </div>
+        </div>
+
+        <!-- Clima cards -->
+        <div id="clima-section">
+            <h2>Clima atual em <strong id="nome-cidade">—</strong></h2>
+            <div class="clima-grid" id="clima-grid"></div>
+        </div>
+
+        <!-- Chat -->
+        <div id="chat-section">
+            <div id="mensagens"></div>
+            <div class="sugestoes" id="sugestoes">
+                <button onclick="enviarSugestao('Vai chover hoje?')">🌧️ Vai chover hoje?</button>
+                <button onclick="enviarSugestao('Preciso de guarda-chuva?')">☂️ Preciso de guarda-chuva?</button>
+                <button onclick="enviarSugestao('Como está o tempo agora?')">🌡️ Como está o tempo agora?</button>
+                <button onclick="enviarSugestao('O que devo vestir hoje?')">👕 O que devo vestir?</button>
+            </div>
+            <div class="chat-input-row">
+                <textarea id="input-msg" rows="1" placeholder="Pergunte sobre o tempo..."></textarea>
+                <button id="btn-enviar" onclick="enviar()">➤</button>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast"></div>
+
+    <script>
+        const API = "";  // vazio = mesmo servidor (funciona no Render)
+        let sessionId = null;
+
+        // ── Enter para enviar ──────────────────────────────────────────────────────
+        document.getElementById("input-msg").addEventListener("keydown", e => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); }
+        });
+        document.getElementById("estado").addEventListener("keydown", e => {
+            if (e.key === "Enter") iniciar();
+        });
+
+        // ── Toast ──────────────────────────────────────────────────────────────────
+        function toast(msg) {
+            const el = document.getElementById("toast");
+            el.textContent = msg;
+            el.classList.add("show");
+            setTimeout(() => el.classList.remove("show"), 3500);
+        }
+
+        // ── Iniciar sessão ─────────────────────────────────────────────────────────
+        async function iniciar() {
+            const cidade = document.getElementById("cidade").value.trim();
+            const estado = document.getElementById("estado").value.trim();
+            if (!cidade || !estado) { toast("Preencha cidade e estado!"); return; }
+
+            const btn = document.getElementById("btn-iniciar");
+            btn.disabled = true;
+            btn.textContent = "Buscando...";
+
+            try {
+                const res = await fetch(`${API}/iniciar`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ cidade, estado }),
+                });
+                if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
+                const data = await res.json();
+                sessionId = data.session_id;
+                renderClima(data.cidade, data.clima);
+                abrirChat();
+            } catch (e) {
+                toast("❌ " + (e.message || "Erro ao buscar cidade."));
+                btn.disabled = false;
+                btn.textContent = "Buscar clima ›";
+            }
+        }
+
+        // ── Renderizar cards de clima ──────────────────────────────────────────────
+        const ICONES = {
+            temp: "🌡️", sens: "🤔", umidade: "💧", vento: "🌬️", precip: "🌧️"
+        };
+
+        function renderClima(cidade, c) {
+            document.getElementById("nome-cidade").textContent = cidade;
+            const grid = document.getElementById("clima-grid");
+            grid.innerHTML = `
+    <div class="condicao-badge">⛅ ${c.condicao}</div>
+    ${card("🌡️", "Temperatura", c.temperatura, "°C")}
+    ${card("🤔", "Sensação", c.sensacao, "°C")}
+    ${card("💧", "Umidade", c.umidade, "%")}
+    ${card("🌬️", "Vento", c.vento, "km/h")}
+    ${card("🌧️", "Precipitação", c.precipitacao, "mm")}
+  `;
+            document.getElementById("clima-section").style.display = "block";
+        }
+
+        function card(icon, label, value, unit) {
+            return `<div class="clima-card">
+    <span class="icon">${icon}</span>
+    <span class="label">${label}</span>
+    <span class="value">${value ?? "N/D"}</span>
+    <span class="unit">${unit}</span>
+  </div>`;
+        }
+
+        // ── Abrir chat ─────────────────────────────────────────────────────────────
+        function abrirChat() {
+            document.getElementById("chat-section").style.display = "flex";
+            adicionarMsg("bot", "Olá! 👋 Já tenho os dados do clima carregados. O que você quer saber sobre o tempo hoje?");
+            document.getElementById("input-msg").focus();
+        }
+
+        // ── Chat ───────────────────────────────────────────────────────────────────
+        function adicionarMsg(role, texto) {
+            const box = document.getElementById("mensagens");
+            const div = document.createElement("div");
+            div.className = `msg ${role}`;
+            div.innerHTML = `
+    <div class="avatar">${role === "user" ? "👤" : "🤖"}</div>
+    <div class="bubble">${texto}</div>
+  `;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+            return div;
+        }
+
+        function adicionarTyping() {
+            const box = document.getElementById("mensagens");
+            const div = document.createElement("div");
+            div.className = "msg bot typing";
+            div.id = "typing";
+            div.innerHTML = `<div class="avatar">🤖</div><div class="bubble"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function enviar() {
+            const inp = document.getElementById("input-msg");
+            const msg = inp.value.trim();
+            if (!msg || !sessionId) return;
+
+            inp.value = "";
+            adicionarMsg("user", msg);
+            document.getElementById("btn-enviar").disabled = true;
+            adicionarTyping();
+
+            try {
+                const res = await fetch(`${API}/chat`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: sessionId, mensagem: msg }),
+                });
+                if (!res.ok) { const e = await res.json(); throw new Error(e.detail); }
+                const data = await res.json();
+                document.getElementById("typing")?.remove();
+                adicionarMsg("bot", data.resposta);
+                // Esconde sugestões após 1ª mensagem
+                document.getElementById("sugestoes").style.display = "none";
+            } catch (e) {
+                document.getElementById("typing")?.remove();
+                adicionarMsg("bot", "❌ Erro: " + (e.message || "Tente novamente."));
+            } finally {
+                document.getElementById("btn-enviar").disabled = false;
+                inp.focus();
+            }
+        }
+
+        function enviarSugestao(texto) {
+            document.getElementById("input-msg").value = texto;
+            enviar();
+        }
+    </script>
+</body>
+
+</html>
