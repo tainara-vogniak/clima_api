@@ -9,16 +9,22 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from groq import Groq
-from datetime import datetime
+from datetime import datetime, timedelta
+import unicodedata
 import requests
+import re
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # carrega variáveis do arquivo .env
+load_dotenv()
+
+# ── Utilitário ────────────────────────────────────────────────────────────────
+def unidecode(texto: str) -> str:
+    """Remove acentos e caracteres especiais — substituto nativo do unidecode."""
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
 
 app = FastAPI()
 
-# Permite requisições do frontend (necessário para CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,15 +32,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve os arquivos estáticos do frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-GROQ_API_KEY   = os.getenv("GROQ_API_KEY","")
+GROQ_API_KEY_  = os.getenv("GROQ_API_KEY", "")
 MODEL          = "llama-3.3-70b-versatile"
 SLIDING_WINDOW = 10
 
-# Armazena sessões de conversa em memória (por session_id)
-sessoes: dict[str, list[dict]] = {}
+sessoes: dict[str, dict] = {}
+
+# ── Cache ─────────────────────────────────────────────────────────────────────
+_cache_previsao: dict = {}
+_cache_geocode:  dict = {}
+CACHE_TTL_MINUTOS = 15
+
+
+# ── Mapa de siglas → nome completo do estado ──────────────────────────────────
+ESTADOS_BR = {
+    "AC": "Acre",             "AL": "Alagoas",               "AP": "Amapá",
+    "AM": "Amazonas",         "BA": "Bahia",                 "CE": "Ceará",
+    "DF": "Distrito Federal", "ES": "Espírito Santo",        "GO": "Goiás",
+    "MA": "Maranhão",         "MT": "Mato Grosso",           "MS": "Mato Grosso do Sul",
+    "MG": "Minas Gerais",     "PA": "Pará",                  "PB": "Paraíba",
+    "PR": "Paraná",           "PE": "Pernambuco",            "PI": "Piauí",
+    "RJ": "Rio de Janeiro",   "RN": "Rio Grande do Norte",   "RS": "Rio Grande do Sul",
+    "RO": "Rondônia",         "RR": "Roraima",               "SC": "Santa Catarina",
+    "SP": "São Paulo",        "SE": "Sergipe",               "TO": "Tocantins",
+}
+
+# Mapa inverso: nome completo (sem acento, minúsculo) → sigla
+ESTADOS_NOME_PARA_SIGLA = {
+    unidecode(v).lower(): k for k, v in ESTADOS_BR.items()
+}
+
+
+# ── Normalização de entrada ───────────────────────────────────────────────────
+def normalizar_entrada(cidade: str, estado: str) -> tuple[str, str]:
+    cidade = cidade.strip()
+    estado_limpo = estado.strip().upper()
+
+    if estado_limpo in ESTADOS_BR:
+        return cidade, estado_limpo
+
+    estado_sem_acento = unidecode(estado.strip()).lower()
+    if estado_sem_acento in ESTADOS_NOME_PARA_SIGLA:
+        return cidade, ESTADOS_NOME_PARA_SIGLA[estado_sem_acento]
+
+    separadores = re.split(r"[/,]", cidade)
+    if len(separadores) == 2:
+        parte_a = separadores[0].strip()
+        parte_b = separadores[1].strip().upper()
+
+        if parte_b in ESTADOS_BR:
+            return parte_a, parte_b
+        if parte_a.upper() in ESTADOS_BR:
+            return parte_b, parte_a.upper()
+
+        parte_b_sem_acento = unidecode(separadores[1].strip()).lower()
+        if parte_b_sem_acento in ESTADOS_NOME_PARA_SIGLA:
+            return parte_a, ESTADOS_NOME_PARA_SIGLA[parte_b_sem_acento]
+
+    return cidade, estado_limpo
 
 
 # ── Modelos de request ────────────────────────────────────────────────────────
@@ -48,27 +105,6 @@ class ChatRequest(BaseModel):
 
 
 # ── Geocodificação ────────────────────────────────────────────────────────────
-def geocode(cidade: str, estado: str) -> dict | None:
-    url    = "https://geocoding-api.open-meteo.com/v1/search"
-    params = {"name": cidade, "count": 10, "language": "pt", "format": "json"}
-    try:
-        r       = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        results = r.json().get("results", [])
-        if not results:
-            return None
-        estado_upper = estado.strip().upper()
-        for loc in results:
-            if loc.get("country_code","").upper() == "BR" and loc.get("admin1_code","").upper() == estado_upper:
-                return _montar_geo(loc, cidade)
-        for loc in results:
-            if loc.get("country_code","").upper() == "BR":
-                return _montar_geo(loc, cidade)
-        return _montar_geo(results[0], cidade)
-    except Exception as e:
-        print(f"[Erro geocodificação] {e}")
-    return None
-
 def _montar_geo(loc: dict, fallback: str) -> dict:
     return {
         "lat":  loc["latitude"],
@@ -77,9 +113,56 @@ def _montar_geo(loc: dict, fallback: str) -> dict:
         "pais": loc.get("country", "Brasil"),
     }
 
+def geocode(cidade: str, estado: str) -> dict | None:
+    chave = f"{unidecode(cidade).lower()}_{estado.lower()}"
+
+    if chave in _cache_geocode:
+        print(f"[geocode] Retornando cache para {chave}")
+        return _cache_geocode[chave]
+
+    url    = "https://geocoding-api.open-meteo.com/v1/search"
+    params = {"name": cidade, "count": 10, "language": "pt", "format": "json"}
+    try:
+        print(f"[geocode] Buscando: {cidade}, {estado}")
+        r = requests.get(url, params=params, timeout=10)
+        print(f"[geocode] Status HTTP: {r.status_code}")
+        r.raise_for_status()
+        results = r.json().get("results", [])
+        if not results:
+            print("[geocode] Nenhum resultado encontrado.")
+            return None
+
+        estado_upper = estado.strip().upper()
+        for loc in results:
+            if loc.get("country_code","").upper() == "BR" and loc.get("admin1_code","").upper() == estado_upper:
+                geo = _montar_geo(loc, cidade)
+                _cache_geocode[chave] = geo
+                return geo
+        for loc in results:
+            if loc.get("country_code","").upper() == "BR":
+                geo = _montar_geo(loc, cidade)
+                _cache_geocode[chave] = geo
+                return geo
+
+        geo = _montar_geo(results[0], cidade)
+        _cache_geocode[chave] = geo
+        return geo
+    except Exception as e:
+        print(f"[Erro geocodificação] TIPO: {type(e).__name__} | MSG: {e}")
+    return None
+
 
 # ── Previsão do tempo ─────────────────────────────────────────────────────────
 def obter_previsao(lat: float, lon: float) -> dict | None:
+    chave = (round(lat, 3), round(lon, 3))
+    agora = datetime.now()
+
+    if chave in _cache_previsao:
+        dados, timestamp = _cache_previsao[chave]
+        if agora - timestamp < timedelta(minutes=CACHE_TTL_MINUTOS):
+            print(f"[previsao] Retornando cache para {chave}")
+            return dados
+
     url    = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat, "longitude": lon,
@@ -90,33 +173,37 @@ def obter_previsao(lat: float, lon: float) -> dict | None:
         "timezone": "America/Sao_Paulo",
     }
     try:
+        print(f"[previsao] Buscando lat={lat}, lon={lon}")
         r = requests.get(url, params=params, timeout=10)
+        print(f"[previsao] Status HTTP: {r.status_code}")
         r.raise_for_status()
-        return r.json()
+        dados = r.json()
+        _cache_previsao[chave] = (dados, agora)
+        return dados
     except Exception as e:
-        print(f"[Erro previsão] {e}")
+        print(f"[Erro previsão] TIPO: {type(e).__name__} | MSG: {e}")
     return None
 
 def codigo_para_descricao(wmo: int) -> str:
     tabela = {
-        0:"Céu limpo",1:"Predominantemente limpo",2:"Parcialmente nublado",
-        3:"Nublado",45:"Neblina",48:"Neblina com geada",
-        51:"Garoa leve",53:"Garoa moderada",55:"Garoa intensa",
-        61:"Chuva leve",63:"Chuva moderada",65:"Chuva intensa",
-        71:"Neve leve",73:"Neve moderada",75:"Neve intensa",
-        80:"Pancadas leves",81:"Pancadas moderadas",82:"Pancadas violentas",
-        95:"Tempestade",96:"Tempestade com granizo",99:"Tempestade severa",
+        0:"Céu limpo",        1:"Predominantemente limpo", 2:"Parcialmente nublado",
+        3:"Nublado",          45:"Neblina",                48:"Neblina com geada",
+        51:"Garoa leve",      53:"Garoa moderada",         55:"Garoa intensa",
+        61:"Chuva leve",      63:"Chuva moderada",         65:"Chuva intensa",
+        71:"Neve leve",       73:"Neve moderada",          75:"Neve intensa",
+        80:"Pancadas leves",  81:"Pancadas moderadas",     82:"Pancadas violentas",
+        95:"Tempestade",      96:"Tempestade com granizo", 99:"Tempestade severa",
     }
     return tabela.get(wmo, f"Código {wmo}")
 
 def formatar_dados_clima(geo: dict, dados: dict) -> str:
-    cur       = dados.get("current", {})
+    cur        = dados.get("current", {})
     hora_atual = datetime.now().hour
-    hourly    = dados.get("hourly", {})
-    prec_prob = hourly.get("precipitation_probability", [])
-    temps     = hourly.get("temperature_2m", [])
-    wcodes    = hourly.get("weathercode", [])
-    proximas  = []
+    hourly     = dados.get("hourly", {})
+    prec_prob  = hourly.get("precipitation_probability", [])
+    temps      = hourly.get("temperature_2m", [])
+    wcodes     = hourly.get("weathercode", [])
+    proximas   = []
     for i in range(hora_atual, min(hora_atual + 6, len(prec_prob))):
         proximas.append(f"  {i:02d}h → {temps[i]:.1f}°C, chuva {prec_prob[i]}%, {codigo_para_descricao(wcodes[i])}")
     return f"""
@@ -140,21 +227,19 @@ def root():
 
 @app.post("/iniciar")
 def iniciar(req: IniciarRequest):
-    """Geocodifica a cidade, busca o clima e cria a sessão."""
-    geo = geocode(req.cidade, req.estado)
+    cidade, estado = normalizar_entrada(req.cidade, req.estado)
+
+    geo = geocode(cidade, estado)
     if not geo:
-        raise HTTPException(status_code=404, detail="Cidade não encontrada.")
+        raise HTTPException(status_code=404, detail=f"Cidade '{cidade}' não encontrada.")
 
     dados_clima = obter_previsao(geo["lat"], geo["lon"])
     if not dados_clima:
         raise HTTPException(status_code=502, detail="Erro ao obter dados de clima.")
 
     bloco_clima = formatar_dados_clima(geo, dados_clima)
+    session_id  = f"{cidade.lower()}_{estado.lower()}_{datetime.now().timestamp()}"
 
-    # ID de sessão simples baseado em cidade+estado
-    session_id = f"{req.cidade.lower()}_{req.estado.lower()}_{datetime.now().timestamp()}"
-
-    # Salva o system prompt junto com a sessão
     sessoes[session_id] = {
         "sistema": f"""Você é um assistente meteorológico inteligente e amigável para {geo['nome']}.
 Use os dados abaixo como base para respostas sobre clima:
@@ -166,8 +251,8 @@ Regras:
 - Seja conciso e claro; adicione dicas práticas (o que vestir, guarda-chuva, etc.).
 - Emita ALERTAS em maiúsculas se houver risco (tempestade, calor extremo, frio intenso).
 - Se perguntarem algo fora do clima, responda brevemente e redirecione ao tema.""",
-        "historico": [],
-        "geo": geo,
+        "historico":   [],
+        "geo":         geo,
         "clima_atual": {
             "temperatura": dados_clima["current"].get("temperature_2m"),
             "sensacao":    dados_clima["current"].get("apparent_temperature"),
@@ -181,25 +266,23 @@ Regras:
     return {
         "session_id": session_id,
         "cidade":     geo["nome"],
+        "estado":     ESTADOS_BR.get(estado, estado),
         "clima":      sessoes[session_id]["clima_atual"],
     }
 
 
 @app.post("/chat")
 def chat(req: ChatRequest):
-    """Recebe mensagem do usuário e retorna resposta do LLM."""
     if req.session_id not in sessoes:
         raise HTTPException(status_code=404, detail="Sessão não encontrada. Reinicie.")
 
-    sessao   = sessoes[req.session_id]
+    sessao    = sessoes[req.session_id]
     historico = sessao["historico"]
 
     historico.append({"role": "user", "content": req.mensagem})
-
-    # Aplica sliding window
     janela = historico[-SLIDING_WINDOW:]
 
-    client = Groq(api_key=GROQ_API_KEY)
+    client = Groq(api_key=GROQ_API_KEY_)
     try:
         resposta = client.chat.completions.create(
             model=MODEL,
